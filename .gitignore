@@ -1,0 +1,5 @@
+.env
+data_engineering/
+data_lake/
+*.log
+__pycache__/
