@@ -4,6 +4,7 @@ import os
 import logging
 import json
 import pandas as pd
+import oci
 
 from datetime import datetime
 from dotenv import load_dotenv
@@ -15,7 +16,12 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-load_dotenv('/home/ubuntu/.env')
+load_dotenv('/home/ubuntu/etl_project/.env')
+
+config_oci = oci.config.from_file()
+object_storage_client = oci.object_storage.ObjectStorageClient(config_oci)
+namespace_oci = object_storage_client.get_namespace().data
+BUCKET_NAME = "datalake-karyawan"
 
 def get_connection():
     return psycopg2.connect(
@@ -37,12 +43,8 @@ def extract_to_datalake():
 
         # Membuat stempel waktu untuk nama file arsip
         waktu_sekarang = datetime.now().strftime("%Y%m%d_%H%M%S")
-        nama_file_raw = f"/home/ubuntu/data_lake/raw_karyawan_{waktu_sekarang}.json"
-        nama_file_meta = f"/home/ubuntu/data_lake/raw_karyawan_{waktu_sekarang}_meta.json"
-
-        # Menyimpan data mentah ke Disk (Data Lake Lokal)
-        with open(nama_file_raw, 'w') as file:
-            json.dump(data_json, file)
+        nama_file_raw = f"raw_karyawan_{waktu_sekarang}.json"
+        nama_file_meta = f"raw_karyawan_{waktu_sekarang}_meta.json"
 
         # Buat metadata untuk audit
         metadata = {
@@ -52,26 +54,34 @@ def extract_to_datalake():
             "raw_file": nama_file_raw
         }
 
-	# Menyimpan metadata dari data mentah yang disimpan
-        with open(nama_file_meta,'w') as file:
-            json.dump(metadata,file)
+        # Melakukan put_object
+        object_storage_client.put_object(
+            namespace_oci,
+            BUCKET_NAME,
+            nama_file_raw,
+            json.dumps(data_json).encode('utf-8')
+        )
+        
+        object_storage_client.put_object(
+            namespace_oci,
+            BUCKET_NAME,
+            nama_file_meta,
+            json.dumps(metadata).encode('utf-8')
+        )
 
-        logging.info(f"[DATA LAKE] data mentah tersimpan di: {nama_file_raw}")
-        logging.info(f"[DATA LAKE] metadata tersimpan di: {nama_file_meta}")
+        logging.info(f"[DATA LAKE] data mentah tersimpan di bucket OCI: {nama_file_raw}")
+        logging.info(f"[DATA LAKE] metadata tersimpan di bucket OCI: {nama_file_meta}")
 
-        return nama_file_raw
+        return data_json
 
     else:
         logging.error(f"Koneksi API gagal. Status: {respons.status_code}")
         raise Exception("Gagal menarik API")
 
-def transform_pandas(nama_file_raw):
+def transform_pandas(data_json):
     logging.info("[TRANSFORM] Membedah Flat Table menjadi Skema Bintang...")
 
-    with open(nama_file_raw, 'r') as file:
-        data_mentah = json.load(file)
-
-    df = pd.json_normalize(data_mentah)
+    df = pd.json_normalize(data_json)
     df.dropna(subset=['id', 'name'], inplace=True)
 
     if 'address.city' not in df.columns:
