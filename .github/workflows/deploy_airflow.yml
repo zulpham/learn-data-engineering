@@ -1,0 +1,34 @@
+name: Deploy Airflow DAGs ke Produksi
+
+# Kapan robot ini bekerja? Saat ada kode baru yang di-push ke branch main.
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy-ke-oci:
+    name: Deployment Otomatis ke VM OCI
+    runs-on: ubuntu-latest # Mesin pekerja milik GitHub
+
+    steps:
+      - name: Checkout Kode
+        uses: actions/checkout@v3
+
+      - name: Eksekusi Jarak Jauh (Remote SSH)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USERNAME }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          # Instruksi yang akan diketik oleh GitHub di dalam terminal VM Anda
+          script: |
+            echo "[SISTEM] Memulai penarikan kode (CD)..."
+            cd /home/ubuntu/etl_project
+            git reset --hard HEAD
+            git pull origin main
+            echo "[SISTEM] Pembaruan kode berhasil."
+            
+            # Jika Anda menggunakan symlink, DAG akan otomatis terbaca oleh Airflow.
+            # Tidak perlu me-restart Airflow untuk perubahan file Python biasa.
